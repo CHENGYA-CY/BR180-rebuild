@@ -1,0 +1,91 @@
+name: Build BR180 for Skyrim 1.7.104
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/vcpkg_binary_cache,readwrite"
+      VCPKG_FORCE_SYSTEM_BINARIES: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Fetch CommonLibSSE-NG (ng branch)
+        shell: bash
+        run: |
+          mkdir -p extern
+          git clone --depth 1 --branch ng https://github.com/alandtse/CommonLibSSE-NG.git extern/CommonLibSSE
+          git -C extern/CommonLibSSE submodule update --init --recursive --depth 1 || true
+
+      - name: Setup MSVC (x64)
+        uses: TheMrMilchmann/setup-msvc-dev@v4.0.0
+        with:
+          arch: x64
+
+      - name: Pin vcpkg downloads dir
+        shell: bash
+        run: echo "VCPKG_DOWNLOADS=${{ github.workspace }}/vcpkg_downloads" >> "$GITHUB_ENV"
+
+      - name: Setup vcpkg (bootstrap only)
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 00c5775211f45cd08b37fce0484b4cb940e422ab
+          runVcpkgInstall: false
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_binary_cache
+          key: ${{ runner.os }}-vcpkg-br180-${{ hashFiles('vcpkg.json') }}
+          restore-keys: ${{ runner.os }}-vcpkg-br180-
+
+      - name: Install dependencies (retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          shell: pwsh
+          command: |
+            $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
+            & "$env:VCPKG_ROOT/vcpkg" install --triplet=x64-windows-static
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_INSTALLED_DIR="${{ github.workspace }}/vcpkg_installed" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Collect DLL
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Get-ChildItem -Path build -Recurse -Filter "*.dll" | Where-Object { $_.Name -like "*BR180*" } | ForEach-Object {
+            Copy-Item $_.FullName artifacts/
+            Write-Host "Collected: $($_.FullName)"
+          }
+
+      - name: Upload DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BR180-1.7.104
+          path: artifacts/*.dll
+          if-no-files-found: error
