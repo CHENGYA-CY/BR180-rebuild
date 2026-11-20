@@ -1,0 +1,41 @@
+#pragma once
+
+// Configuration mirror of the original BR180.ini.
+// All keys were extracted verbatim from the original DLL's string table.
+struct Config
+{
+    // [Rotation]
+    bool  bReverseInputRot{ false };
+    bool  bReverseMatrixMult{ true };
+    float fUpdateRotX{ 0.0f };
+    float fUpdateRotY{ 0.0f };
+    float fUpdateRotZ{ 180.0f };
+
+    float fTransitionEnterRotX{ 0.0f };
+    float fTransitionEnterRotY{ 0.0f };
+    float fTransitionEnterRotZ{ 180.0f };
+
+    float fTransitionLeaveRotX{ 0.0f };
+    float fTransitionLeaveRotY{ 0.0f };
+    float fTransitionLeaveRotZ{ 0.0f };
+
+    float fTransitionMoveRotX{ 0.0f };
+    float fTransitionMoveRotY{ 0.0f };
+    float fTransitionMoveRotZ{ 180.0f };
+
+    // [Override]
+    float fInitialPitch{ 310.0f };
+    std::int16_t iExtendCellNW_Y{ 10 };
+    std::int16_t iExtendCellSE_X{ 10 };
+
+    // [Hacks]
+    bool bChangeXRotSignInEnterTransition{ true };
+    bool bReverseCopyRotationInLeaveTransition{ true };
+
+    static Config& GetSingleton();
+    void           Load();
+    void           Log() const;
+
+private:
+    Config() = default;
+};
