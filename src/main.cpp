@@ -33,14 +33,11 @@ static void OnMessage(SKSE::MessagingInterface::Message* a_msg)
 
 SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
 {
-    if (!SKSE::Init(a_skse, { .log = true, .logName = "BR180"sv, .trampoline = true, .trampolineSize = 256 })) {
-        return false;
-    }
+    SKSE::Init(a_skse, { .log = true, .logName = "BR180", .trampoline = true, .trampolineSize = 256 });
 
     SKSE::log::info("BR180 v{}.{}.{}-0", Version::MAJOR, Version::MINOR, Version::PATCH);
-    SKSE::log::info("Runtime: {:08x}; SKSE: {:08x}",
-        static_cast<std::uint32_t>(a_skse->RuntimeVersion()),
-        static_cast<std::uint32_t>(a_skse->SKSEVersion()));
+    SKSE::log::info("Runtime: {:08x}", a_skse->RuntimeVersion().pack());
+    SKSE::log::info("SKSE: {:08x}", a_skse->SKSEVersion());
 
     auto messaging = SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener("BR180", OnMessage)) {

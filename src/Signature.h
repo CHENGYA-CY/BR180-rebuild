@@ -22,7 +22,7 @@ namespace Scan
         return bytes;
     }
 
-    inline std::uintptr_t FindInSegment(REL::Module::Segment::Name a_seg, std::string_view a_pattern)
+    inline std::uintptr_t FindInSegment(REL::Segment::Name a_seg, std::string_view a_pattern)
     {
         std::vector<bool> mask;
         const auto        bytes = Parse(a_pattern, mask);
@@ -56,15 +56,15 @@ namespace Scan
 
     inline std::uintptr_t Find(std::string_view a_pattern)
     {
-        auto va = FindInSegment(REL::Module::Segment::textx, a_pattern);
+        auto va = FindInSegment(REL::Segment::textx, a_pattern);
         if (va) {
             return va;
         }
-        return FindInSegment(REL::Module::Segment::textw, a_pattern);
+        return FindInSegment(REL::Segment::textw, a_pattern);
     }
 
     // Count matches to verify a signature is unique.
-    inline std::size_t CountMatches(REL::Module::Segment::Name a_seg, std::string_view a_pattern)
+    inline std::size_t CountMatches(REL::Segment::Name a_seg, std::string_view a_pattern)
     {
         std::vector<bool> mask;
         const auto        bytes = Parse(a_pattern, mask);

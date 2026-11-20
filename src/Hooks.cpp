@@ -149,13 +149,13 @@ namespace BR180
         RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event,
             RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
         {
-            if (!a_event || !a_event->menuName) {
+            if (!a_event || a_event->menuName.empty()) {
                 return RE::BSEventNotifyControl::kContinue;
             }
             if (a_event->menuName == RE::MapMenu::MENU_NAME) {
                 const auto tes = RE::TES::GetSingleton();
                 if (a_event->opening) {
-                    WorldOverride::Apply(tes ? tes->worldSpace : nullptr);
+                    WorldOverride::Apply(tes && tes->GetRuntimeData2() ? tes->GetRuntimeData2()->worldSpace : nullptr);
                 } else {
                     WorldOverride::Revert();
                 }
@@ -183,14 +183,14 @@ namespace BR180
 
         // Input-sign hooks: install only where the signature resolved.
         if (HookSites::addInputTranslation) {
-            stl::write_thunk_call<AddInputTranslationHook>(HookSites::addInputTranslation);
+            br_stl::write_thunk_call<AddInputTranslationHook>(HookSites::addInputTranslation);
             SKSE::log::info("Installed AddInputTranslation hook @ {:x}", HookSites::addInputTranslation);
         } else {
             SKSE::log::warn("AddInputTranslation signature not found");
         }
 
         if (HookSites::addInputRotation) {
-            stl::write_thunk_call<AddInputRotationHook>(HookSites::addInputRotation);
+            br_stl::write_thunk_call<AddInputRotationHook>(HookSites::addInputRotation);
             SKSE::log::info("Installed AddInputRotation hook @ {:x}", HookSites::addInputRotation);
         } else {
             SKSE::log::warn("AddInputRotation signature not found");
@@ -214,7 +214,7 @@ namespace BR180
         }
         if (a_msg->type == SKSE::MessagingInterface::kPostLoadGame) {
             const auto tes = RE::TES::GetSingleton();
-            WorldOverride::Apply(tes ? tes->worldSpace : nullptr);
+            WorldOverride::Apply(tes && tes->GetRuntimeData2() ? tes->GetRuntimeData2()->worldSpace : nullptr);
         }
     }
 }
