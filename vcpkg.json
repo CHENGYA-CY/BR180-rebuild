@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
+  "name": "br180",
+  "version-semver": "1.2.0",
+  "description": "Map Flip for Beyond Reach - rebuilt for Skyrim SE 1.7.104 (Address Library format 5)",
+  "license": "GPL-3.0-or-later",
+  "supports": "windows & x64",
+  "builtin-baseline": "ee12231b20c95013c6638d845d04c91559a1d1ff",
+  "dependencies": [
+    "vcpkg-cmake-config",
+    "directxmath",
+    "directxtk",
+    "fmt",
+    "nlohmann-json",
+    "rapidcsv",
+    "simpleini",
+    "spdlog",
+    "toml11",
+    "xbyak"
+  ]
+}
