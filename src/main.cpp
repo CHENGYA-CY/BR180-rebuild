@@ -39,7 +39,7 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
     SKSE::Init(a_skse, { .log = true, .logName = "BR180", .trampoline = true, .trampolineSize = 256 });
 
     SKSE::log::info("BR180 v{}.{}.{}-0", Version::MAJOR, Version::MINOR, Version::PATCH);
-    SKSE::log::info("build tag: v9-mirror-modes (1=LR,2=TB,3=rot180)");
+    SKSE::log::info("build tag: v10-scaleform (mirror via MapMenu.swf _xscale)");
     SKSE::log::info("Runtime: {:08x}", a_skse->RuntimeVersion().pack());
     SKSE::log::info("SKSE: {:08x}", a_skse->SKSEVersion());
 

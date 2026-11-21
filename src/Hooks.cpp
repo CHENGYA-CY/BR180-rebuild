@@ -382,6 +382,106 @@ namespace BR180
         }
     }
 
+    // ---------------------------------------------------------------------------
+    // Scaleform map mirror.
+    //
+    // The world map is NOT a 3D scene: Skyrim renders it through MapMenu.swf, so
+    // rotating a NiNode (v6..v9) can never change what the player sees -- confirmed
+    // by the probe logs, where MapMenu::camera had cameraRoot == null and
+    // currentState == null forever.
+    //
+    // MapMenu.swf (extracted from Skyrim - Interface.bsa) contains a real display
+    // object for the map and it does export the _xscale / _yscale properties, so the
+    // mirror is done by setting those to -100 (percent) on the map container.
+    //
+    // The exact instance name is not documented, so every plausible candidate is
+    // tried and the results are logged: whichever resolves first wins, and the log
+    // tells us the truth even if none of them match.
+    // ---------------------------------------------------------------------------
+    namespace ScaleformMirror
+    {
+        struct Candidate
+        {
+            const char* path;
+            const char* label;
+        };
+
+        static constexpr Candidate kCandidates[] = {
+            { "_root.Map", "Map" },
+            { "_root.WorldMap", "WorldMap" },
+            { "_root.MapClip", "MapClip" },
+            { "_root.MapMovie", "MapMovie" },
+            { "_root.MapImageLoader", "MapImageLoader" },
+            { "_root.TextureHolder", "TextureHolder" },
+        };
+
+        static const char* g_hit{ nullptr };
+        static int         g_probeLeft{ 0 };
+        static bool        g_reported{ false };
+
+        static void Apply(RE::MapMenu* a_menu, int a_mode)
+        {
+            if (!a_menu) {
+                return;
+            }
+            auto* view = a_menu->uiMovie.get();
+            if (!view) {
+                if (g_probeLeft > 0) {
+                    --g_probeLeft;
+                    SKSE::log::warn("scaleform: uiMovie is null");
+                }
+                return;
+            }
+
+            if (!g_hit && g_probeLeft > 0) {
+                --g_probeLeft;
+                for (const auto& c : kCandidates) {
+                    RE::GFxValue v;
+                    const bool ok = view->GetVariable(&v, c.path);
+                    SKSE::log::info("scaleform probe: {} ok={} type={}",
+                        c.label, ok, static_cast<int>(v.GetType()));
+                    if (ok && !g_hit) {
+                        g_hit = c.path;
+                    }
+                }
+                if (g_hit) {
+                    SKSE::log::info("scaleform: map object resolved at {}", g_hit);
+                } else {
+                    SKSE::log::warn("scaleform: no candidate matched");
+                }
+            }
+
+            if (!g_hit) {
+                return;
+            }
+
+            const double sx = (a_mode == 1 || a_mode == 3) ? -100.0 : 100.0;
+            const double sy = (a_mode == 2 || a_mode == 3) ? -100.0 : 100.0;
+
+            const std::string px = std::string(g_hit) + "._xscale";
+            const std::string py = std::string(g_hit) + "._yscale";
+            const bool okx = view->SetVariableDouble(px.c_str(), sx);
+            const bool oky = view->SetVariableDouble(py.c_str(), sy);
+
+            if (!g_reported) {
+                g_reported = true;
+                SKSE::log::info("scaleform mirror: path={} xscale={} ok={} yscale={} ok={}",
+                    g_hit, sx, okx, sy, oky);
+            }
+        }
+
+        static void OnMenuOpen()
+        {
+            g_probeLeft = 2;
+            g_reported = false;
+        }
+
+        static void Reset()
+        {
+            g_reported = false;
+        }
+    }
+
     // Map menu open/close listener drives the worldspace overrides only while the map
     // is open (matches "only for the map menu" semantics of the original ini).
     class MapMenuListener : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
@@ -403,10 +503,13 @@ namespace BR180
                 const auto tes = RE::TES::GetSingleton();
                 if (a_event->opening) {
                     WorldOverride::Apply(tes ? tes->GetRuntimeData2().worldSpace : nullptr);
-                    MapCameraFlip::Start();
+                    ScaleformMirror::OnMenuOpen();
+                    auto* ui = RE::UI::GetSingleton();
+                    auto* mapMenu = ui ? ui->GetMenu<RE::MapMenu>().get() : nullptr;
+                    ScaleformMirror::Apply(mapMenu, Config::GetSingleton().iFlipMode);
                 } else {
                     WorldOverride::Revert();
-                    MapCameraFlip::Stop();
+                    ScaleformMirror::Reset();
                 }
             }
             return RE::BSEventNotifyControl::kContinue;
