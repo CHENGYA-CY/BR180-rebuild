@@ -155,7 +155,7 @@ namespace BR180
             if (a_event->menuName == RE::MapMenu::MENU_NAME) {
                 const auto tes = RE::TES::GetSingleton();
                 if (a_event->opening) {
-                    WorldOverride::Apply(tes && tes->GetRuntimeData2() ? tes->GetRuntimeData2()->worldSpace : nullptr);
+                    WorldOverride::Apply(tes ? tes->GetRuntimeData2().worldSpace : nullptr);
                 } else {
                     WorldOverride::Revert();
                 }
@@ -181,25 +181,22 @@ namespace BR180
             HookSites::transitionOnEnter, HookSites::updateMapTransition,
             HookSites::setCompassAngle);
 
-        // Input-sign hooks: install only where the signature resolved.
-        if (HookSites::addInputTranslation) {
-            br_stl::write_thunk_call<AddInputTranslationHook>(HookSites::addInputTranslation);
-            SKSE::log::info("Installed AddInputTranslation hook @ {:x}", HookSites::addInputTranslation);
-        } else {
-            SKSE::log::warn("AddInputTranslation signature not found");
-        }
-
-        if (HookSites::addInputRotation) {
-            br_stl::write_thunk_call<AddInputRotationHook>(HookSites::addInputRotation);
-            SKSE::log::info("Installed AddInputRotation hook @ {:x}", HookSites::addInputRotation);
-        } else {
-            SKSE::log::warn("AddInputRotation signature not found");
-        }
-
-        // NOTE: hook1/2/3/4/7 are located but intentionally NOT installed in this draft.
-        // Their callbacks use unverified ABIs and hardcoded object offsets; installing
-        // them blindly would crash. They are logged above for the next iteration after
-        // in-game dynamic verification.
+        // ---------------------------------------------------------------------
+        // BASELINE BUILD — no code hooks are installed.
+        //
+        // hook5/6 land on function-ENTRY instructions (addss / movss), not on
+        // call instructions. write_call<5>() would overwrite real code and
+        // return a bogus "original function" pointer -> guaranteed CTD.
+        // hook1/2/7 land on E8 call sites (patchable), but their thunk ABIs
+        // are not yet verified. hook3/4 need entry detours with a trampoline
+        // that replays the overwritten prologue bytes.
+        //
+        // All 7 sites are resolved and logged above. This build therefore loads
+        // cleanly on 1.7.104 (format 5) and applies only the struct-level
+        // overrides, which are safe. Hooks are enabled one by one in the next
+        // iteration after their callback signatures are verified in-game.
+        // ---------------------------------------------------------------------
+        SKSE::log::info("Baseline build: {} hook sites resolved; code hooks disabled pending ABI verification", 7);
 
         if (auto* ui = RE::UI::GetSingleton()) {
             ui->AddEventSink<RE::MenuOpenCloseEvent>(MapMenuListener::GetSingleton());
@@ -214,7 +211,7 @@ namespace BR180
         }
         if (a_msg->type == SKSE::MessagingInterface::kPostLoadGame) {
             const auto tes = RE::TES::GetSingleton();
-            WorldOverride::Apply(tes && tes->GetRuntimeData2() ? tes->GetRuntimeData2()->worldSpace : nullptr);
+            WorldOverride::Apply(tes ? tes->GetRuntimeData2().worldSpace : nullptr);
         }
     }
 }
