@@ -400,24 +400,65 @@ namespace BR180
     // ---------------------------------------------------------------------------
     namespace ScaleformMirror
     {
-        struct Candidate
+        static RE::GFxValue g_target{};
+        static bool         g_haveTarget{ false };
+        static bool         g_fromMapMovie{ false };
+        static int          g_probeLeft{ 0 };
+        static bool         g_reported{ false };
+
+        static const char* SafeName(RE::GFxValue& a_val)
         {
-            const char* path;
-            const char* label;
-        };
+            RE::GFxValue nm;
+            if (a_val.GetMember("_name", &nm) && nm.IsString()) {
+                if (const char* s = nm.GetString()) {
+                    return s;
+                }
+            }
+            return "";
+        }
 
-        static constexpr Candidate kCandidates[] = {
-            { "_root.Map", "Map" },
-            { "_root.WorldMap", "WorldMap" },
-            { "_root.MapClip", "MapClip" },
-            { "_root.MapMovie", "MapMovie" },
-            { "_root.MapImageLoader", "MapImageLoader" },
-            { "_root.TextureHolder", "TextureHolder" },
-        };
+        // Walk _root's children by depth and log every display object. The world map
+        // container is created at run time by ActionScript, so it is not in the SWF's
+        // static structure -- but it must be reachable as a child of _root.
+        static void Enumerate(RE::GFxMovieView* a_view)
+        {
+            RE::GFxValue root;
+            if (!a_view->GetVariable(&root, "_root")) {
+                SKSE::log::warn("scaleform: cannot read _root");
+                return;
+            }
+            SKSE::log::info("scaleform: _root type={}", static_cast<int>(root.GetType()));
 
-        static const char* g_hit{ nullptr };
-        static int         g_probeLeft{ 0 };
-        static bool        g_reported{ false };
+            int shown = 0;
+            for (int d = 0; d < 256 && shown < 40; ++d) {
+                RE::GFxValue depthVal(static_cast<double>(d));
+                RE::GFxValue inst;
+                if (!root.Invoke("getInstanceAtDepth", &inst, &depthVal, 1)) {
+                    continue;
+                }
+                if (!inst.IsDisplayObject()) {
+                    continue;
+                }
+                const char* nm = SafeName(inst);
+                SKSE::log::info("scaleform: _root depth={} name='{}'", d, nm);
+                ++shown;
+
+                if (!g_haveTarget && nm && nm[0]) {
+                    std::string lower{ nm };
+                    for (auto& c : lower) {
+                        c = lowerAscii(c);
+                    }
+                    if (lower.find("map") != std::string::npos) {
+                        g_target = inst;
+                        g_haveTarget = true;
+                        SKSE::log::info("scaleform: picked display object '{}' at depth {}", nm, d);
+                    }
+                }
+            }
+            if (!g_haveTarget) {
+                SKSE::log::warn("scaleform: no _root child with 'map' in its name");
+            }
+        }
 
         static void Apply(RE::MapMenu* a_menu, int a_mode)
         {
@@ -433,52 +474,273 @@ namespace BR180
                 return;
             }
 
-            if (!g_hit && g_probeLeft > 0) {
+            if (!g_haveTarget && g_probeLeft > 0) {
                 --g_probeLeft;
-                for (const auto& c : kCandidates) {
-                    RE::GFxValue v;
-                    const bool ok = view->GetVariable(&v, c.path);
-                    SKSE::log::info("scaleform probe: {} ok={} type={}",
-                        c.label, ok, static_cast<int>(v.GetType()));
-                    if (ok && !g_hit) {
-                        g_hit = c.path;
+
+                // 1) C++ side: MapMenu::mapMovie holds the GFxValue of the map clip.
+                auto& mm = a_menu->mapMovie;
+                SKSE::log::info("scaleform: MapMenu::mapMovie type={}", static_cast<int>(mm.GetType()));
+                if (mm.IsDisplayObject()) {
+                    g_target = mm;
+                    g_haveTarget = true;
+                    g_fromMapMovie = true;
+                    SKSE::log::info("scaleform: using MapMenu::mapMovie (display object)");
+                }
+
+                // 2) AS2 side. The bytecode shows MapMovie is assigned as a member of
+                //    the MapMenu class (_global.Map.MapMenu.MapMovie), and it is the
+                //    container that owns MarkerClips (world map markers) as well as
+                //    LocalMapFader.MapClip (interior map).
+                if (!g_haveTarget) {
+                    static constexpr const char* kPaths[] = {
+                        "_global.Map.MapMenu.MapMovie",
+                        "_global.MapMenu.MapMovie",
+                        "_root.MapMovie",
+                        "_root.WorldMap.MapMovie",
+                    };
+                    for (const auto* p : kPaths) {
+                        RE::GFxValue v;
+                        const bool ok = view->GetVariable(&v, p);
+                        SKSE::log::info("scaleform: {} ok={} type={}",
+                            p, ok, static_cast<int>(v.GetType()));
+                        if (ok && v.IsDisplayObject()) {
+                            g_target = v;
+                            g_haveTarget = true;
+                            SKSE::log::info("scaleform: using {}", p);
+                            break;
+                        }
                     }
                 }
-                if (g_hit) {
-                    SKSE::log::info("scaleform: map object resolved at {}", g_hit);
-                } else {
-                    SKSE::log::warn("scaleform: no candidate matched");
+
+                // 3) Last resort: enumerate _root children (diagnostic value only).
+                if (!g_haveTarget) {
+                    Enumerate(view);
                 }
             }
 
-            if (!g_hit) {
+            if (!g_haveTarget) {
                 return;
             }
 
             const double sx = (a_mode == 1 || a_mode == 3) ? -100.0 : 100.0;
             const double sy = (a_mode == 2 || a_mode == 3) ? -100.0 : 100.0;
 
-            const std::string px = std::string(g_hit) + "._xscale";
-            const std::string py = std::string(g_hit) + "._yscale";
-            const bool okx = view->SetVariableDouble(px.c_str(), sx);
-            const bool oky = view->SetVariableDouble(py.c_str(), sy);
+            RE::GFxValue::DisplayInfo info;
+            info.SetXScale(sx);
+            info.SetYScale(sy);
+            const bool ok = g_target.SetDisplayInfo(info);
 
             if (!g_reported) {
                 g_reported = true;
-                SKSE::log::info("scaleform mirror: path={} xscale={} ok={} yscale={} ok={}",
-                    g_hit, sx, okx, sy, oky);
+                SKSE::log::info("scaleform mirror: fromMapMovie={} xscale={} yscale={} ok={}",
+                    g_fromMapMovie, sx, sy, ok);
             }
-        }
-
-        static void OnMenuOpen()
-        {
-            g_probeLeft = 2;
-            g_reported = false;
         }
 
         static void Reset()
         {
             g_reported = false;
+            g_haveTarget = false;
+            g_fromMapMovie = false;
+            g_target = RE::GFxValue();
+        }
+
+        static void OnMenuOpen()
+        {
+            // Re-resolve every time the map opens: the GFxValue handle must not be
+            // reused across menu instances, and the game may rebuild the clip.
+            Reset();
+            g_probeLeft = 2;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // MapMirror — per-frame hook on MapMenu::AdvanceMovie (vtable index 5).
+    //
+    // Reverse-engineering rationale (why every earlier approach failed):
+    //   * MapMenu::RUNTIME_DATA2 contains `bool cameraSetupPending` (0x12B):
+    //     the map camera is built LAZILY after the menu opens. SKSE's task queue
+    //     drains within the SAME frame, so any probe fired from MenuOpenCloseEvent
+    //     sees a null cameraRoot -- exactly what previous builds logged.
+    //   * MapMenu overrides IMenu::AdvanceMovie (vtable index 5) and the UI calls
+    //     it once per frame while the map is up. That is the only place where the
+    //     camera is guaranteed to exist, and where re-applying the transform each
+    //     frame defeats any rewrite the game performs.
+    //   * Mirroring is done by negating matrix ROWS, i.e. pre-multiplying by
+    //     diag(-1,1,1) (left/right) or diag(1,-1,1) (up/down). This avoids relying
+    //     on NiMatrix3::operator* and on matrix storage-order assumptions beyond
+    //     row-major (Skyrim's NiMatrix3 is row-major).
+    // -------------------------------------------------------------------------
+    namespace MapMirror
+    {
+        using AdvanceMovie_t = void (*)(RE::MapMenu*, float, std::uint32_t);
+
+        static AdvanceMovie_t g_orig{ nullptr };
+        static bool           g_installed{ false };
+        static RE::NiNode*    g_root{ nullptr };
+        static RE::NiMatrix3  g_origRot{};      // pristine baseline (game's own matrix)
+        static RE::NiMatrix3  g_written{};      // what we last wrote
+        static bool           g_haveOrig{ false };
+        static bool           g_hasWritten{ false };
+        static int            g_waitLog{ 8 };
+        static int            g_applyLog{ 3 };
+
+        static bool SameMatrix(const RE::NiMatrix3& a_lhs, const RE::NiMatrix3& a_rhs)
+        {
+            for (int r = 0; r < 3; ++r) {
+                for (int c = 0; c < 3; ++c) {
+                    if (std::fabs(a_lhs.entry[r][c] - a_rhs.entry[r][c]) > 1e-5f) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        static void ApplyTransform(RE::MapMenu* a_menu, int a_mode)
+        {
+            auto* root = a_menu->camera.cameraRoot.get();
+            if (!root) {
+                if (g_waitLog > 0) {
+                    --g_waitLog;
+                    SKSE::log::info("mirror: camera pending={} root=null (frame {})",
+                        a_menu->cameraSetupPending ? 1 : 0, 8 - g_waitLog);
+                }
+                return;
+            }
+
+            // ---- baseline selection -------------------------------------------
+            // The camera node is REUSED between map open/close cycles. If we simply
+            // re-cached whatever the node currently holds, on the second open we
+            // would cache our OWN mirrored matrix as the "original" and mirroring
+            // it again would silently undo the effect. So:
+            //   * different node        -> adopt its current matrix as baseline
+            //   * same node, but matrix != what we wrote
+            //                           -> the game overwrote it, adopt that value
+            //   * same node, matrix == what we wrote
+            //                           -> ours is still in place, keep baseline
+            if (g_root != root || !g_haveOrig) {
+                g_root = root;
+                g_origRot = root->local.rotate;
+                g_haveOrig = true;
+                g_hasWritten = false;
+                if (g_applyLog > 0) {
+                    --g_applyLog;
+                    SKSE::log::info("mirror: camera root acquired {} translate=({}, {}, {}) mode={}",
+                        static_cast<const void*>(root),
+                        root->local.translate.x, root->local.translate.y, root->local.translate.z,
+                        a_mode);
+                    SKSE::log::info("mirror: camera state pending={} state={} ws={}",
+                        a_menu->cameraSetupPending ? 1 : 0,
+                        static_cast<const void*>(a_menu->camera.currentState.get()),
+                        static_cast<const void*>(a_menu->camera.worldSpace));
+                    SKSE::log::info("mirror: origRot rows = [{}, {}, {}] [{}, {}, {}] [{}, {}, {}]",
+                        g_origRot.entry[0][0], g_origRot.entry[0][1], g_origRot.entry[0][2],
+                        g_origRot.entry[1][0], g_origRot.entry[1][1], g_origRot.entry[1][2],
+                        g_origRot.entry[2][0], g_origRot.entry[2][1], g_origRot.entry[2][2]);
+                }
+            } else if (g_hasWritten && !SameMatrix(root->local.rotate, g_written)) {
+                // The game re-derived the transform; take its value as the new baseline.
+                g_origRot = root->local.rotate;
+                if (g_applyLog > 0) {
+                    --g_applyLog;
+                    SKSE::log::info("mirror: game rewrote the transform, baseline refreshed");
+                }
+            }
+            if (!g_haveOrig) {
+                return;
+            }
+
+            // Start from the pristine matrix so repeated application never accumulates.
+            auto m = g_origRot;
+            if (a_mode == 1) {
+                // left/right mirror: negate row 0  (pre-multiply by diag(-1,1,1))
+                m.entry[0][0] = -g_origRot.entry[0][0];
+                m.entry[0][1] = -g_origRot.entry[0][1];
+                m.entry[0][2] = -g_origRot.entry[0][2];
+            } else if (a_mode == 2) {
+                // up/down mirror: negate row 1   (pre-multiply by diag(1,-1,1))
+                m.entry[1][0] = -g_origRot.entry[1][0];
+                m.entry[1][1] = -g_origRot.entry[1][1];
+                m.entry[1][2] = -g_origRot.entry[1][2];
+            } else {
+                // 180 degrees about Z: negate rows 0 and 1
+                m.entry[0][0] = -g_origRot.entry[0][0];
+                m.entry[0][1] = -g_origRot.entry[0][1];
+                m.entry[0][2] = -g_origRot.entry[0][2];
+                m.entry[1][0] = -g_origRot.entry[1][0];
+                m.entry[1][1] = -g_origRot.entry[1][1];
+                m.entry[1][2] = -g_origRot.entry[1][2];
+            }
+            root->local.rotate = m;
+            g_written = m;
+            g_hasWritten = true;
+
+            if (g_applyLog > 0) {
+                --g_applyLog;
+                SKSE::log::info("mirror: applied mode={} to camera root", a_mode);
+            }
+        }
+
+        static void Hook_AdvanceMovie(RE::MapMenu* a_menu, float a_interval, std::uint32_t a_time)
+        {
+            if (g_orig) {
+                g_orig(a_menu, a_interval, a_time);
+            }
+            if (!a_menu) {
+                return;
+            }
+            auto& cfg = Config::GetSingleton();
+            if (cfg.iFlipMode <= 0 || cfg.iFlipMode > 3) {
+                return;
+            }
+            const auto tes = RE::TES::GetSingleton();
+            auto* ws = tes ? tes->GetRuntimeData2().worldSpace : nullptr;
+            if (!isBRWorldspace(ws)) {
+                return;
+            }
+            ApplyTransform(a_menu, cfg.iFlipMode);
+        }
+
+        static void Install(RE::MapMenu* a_menu)
+        {
+            if (g_installed || !a_menu) {
+                return;
+            }
+            // `a_menu` starts with the vptr; dereferencing it yields the vtable
+            // address, i.e. a pointer to the array of entry addresses.
+            auto* vtbl = *reinterpret_cast<std::uintptr_t**>(a_menu);
+            if (!vtbl) {
+                SKSE::log::error("mirror: MapMenu has null vtable");
+                return;
+            }
+            const auto slot = reinterpret_cast<std::uintptr_t>(&vtbl[5]);
+            const auto cur = vtbl[5];
+            const auto hook = reinterpret_cast<std::uintptr_t>(&Hook_AdvanceMovie);
+            if (cur == hook) {
+                g_installed = true;
+                return;
+            }
+            // Sanity report: on 1.7.104 the expected original is 0x14099bd30
+            // (MapMenu::AdvanceMovie). If a different value shows up in the log,
+            // another mod hooked it first (we chain correctly) or the vtable layout
+            // differs -- either way the log tells us immediately.
+            SKSE::log::info("mirror: MapMenu vtable={} vtbl[5]={:x} (expect 14099bd30)",
+                static_cast<const void*>(vtbl), cur);
+            g_orig = reinterpret_cast<AdvanceMovie_t>(cur);
+            REL::safe_write(slot, &hook, sizeof(hook));
+            g_installed = true;
+            SKSE::log::info("mirror: hooked MapMenu::AdvanceMovie vtbl[5] -> {:x}", hook);
+        }
+
+        static void ResetForOpen()
+        {
+            // Deliberately KEEP g_root / g_origRot / g_written / g_haveOrig across
+            // map open-close cycles. The camera node is reused by the game; clearing
+            // the cached baseline would make the next open cache our own mirrored
+            // matrix as the "original", which silently cancels the effect.
+            g_waitLog = 8;
+            g_applyLog = 3;
         }
     }
 
@@ -501,15 +763,15 @@ namespace BR180
             }
             if (a_event->menuName == RE::MapMenu::MENU_NAME) {
                 const auto tes = RE::TES::GetSingleton();
+                auto* ui = RE::UI::GetSingleton();
+                auto* mapMenu = ui ? ui->GetMenu<RE::MapMenu>().get() : nullptr;
                 if (a_event->opening) {
                     WorldOverride::Apply(tes ? tes->GetRuntimeData2().worldSpace : nullptr);
-                    ScaleformMirror::OnMenuOpen();
-                    auto* ui = RE::UI::GetSingleton();
-                    auto* mapMenu = ui ? ui->GetMenu<RE::MapMenu>().get() : nullptr;
-                    ScaleformMirror::Apply(mapMenu, Config::GetSingleton().iFlipMode);
+                    MapMirror::ResetForOpen();
+                    MapMirror::Install(mapMenu);
                 } else {
                     WorldOverride::Revert();
-                    ScaleformMirror::Reset();
+                    MapMirror::ResetForOpen();
                 }
             }
             return RE::BSEventNotifyControl::kContinue;
