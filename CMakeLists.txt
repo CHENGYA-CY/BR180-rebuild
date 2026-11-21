@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 set(NAME "BR180" CACHE STRING "")
-set(VERSION 1.2.0 CACHE STRING "")
+set(VERSION 1.5.0 CACHE STRING "")
 
 # ---- vcpkg toolchain (provided by CI or local VCPKG_ROOT) ----
 if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
