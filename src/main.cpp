@@ -43,10 +43,21 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
     SKSE::log::info("SKSE: {:08x}", a_skse->SKSEVersion());
 
     auto messaging = SKSE::GetMessagingInterface();
-    if (!messaging || !messaging->RegisterListener("BR180", OnMessage)) {
-        SKSE::log::error("Failed to register messaging listener");
+    // The first argument MUST be "SKSE": that subscribes to SKSE's own message
+    // source (kPostLoad / kPostPostLoad / kPostLoadGame). Passing our own plugin
+    // name instead makes SKSE look up a *plugin channel* with that exact name, which
+    // does not exist (our registered name is the long PluginName), so it returns
+    // false -> SKSEPlugin_Load returns false -> SKSE reports
+    // "reported as incompatible during load".
+    if (!messaging) {
+        SKSE::log::error("Failed to get messaging interface");
         return false;
     }
+    if (!messaging->RegisterListener("SKSE", OnMessage)) {
+        SKSE::log::error("Failed to register SKSE messaging listener");
+        return false;
+    }
+    SKSE::log::info("Registered SKSE messaging listener");
 
     return true;
 }
