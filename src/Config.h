@@ -31,6 +31,11 @@ struct Config
     // northRotation by 180 degrees. Zero-risk struct write, may flip the
     // compass/map orientation. Set bFlipNorthRotation=0 in the ini to disable.
     bool bFlipNorthRotation{ true };
+    // Rebuild-only switch: rotate the map camera's render root (MapMenu::camera
+    // .cameraRoot) by fUpdateRotZ degrees every frame while the map is open.
+    // This is what actually makes the map appear rotated. Set bFlipMapCamera=0
+    // in the ini to disable if it looks wrong.
+    bool bFlipMapCamera{ true };
 
     // [Hacks]
     bool bChangeXRotSignInEnterTransition{ true };

@@ -94,6 +94,7 @@ void Config::Load()
     iExtendCellNW_Y = ReadI16(path, "Override", "iExtendCellNW_Y", iExtendCellNW_Y);
     iExtendCellSE_X = ReadI16(path, "Override", "iExtendCellSE_X", iExtendCellSE_X);
     bFlipNorthRotation = ReadBool(path, "Override", "bFlipNorthRotation", bFlipNorthRotation);
+    bFlipMapCamera = ReadBool(path, "Override", "bFlipMapCamera", bFlipMapCamera);
 
     bChangeXRotSignInEnterTransition = ReadBool(path, "Hacks", "bChangeXRotSignInEnterTransition", bChangeXRotSignInEnterTransition);
     bReverseCopyRotationInLeaveTransition = ReadBool(path, "Hacks", "bReverseCopyRotationInLeaveTransition", bReverseCopyRotationInLeaveTransition);
@@ -112,6 +113,7 @@ void Config::Log() const
     SKSE::log::info("iExtendCellNW_Y={}", iExtendCellNW_Y);
     SKSE::log::info("iExtendCellSE_X={}", iExtendCellSE_X);
     SKSE::log::info("bFlipNorthRotation={}", bFlipNorthRotation);
+    SKSE::log::info("bFlipMapCamera={}", bFlipMapCamera);
     SKSE::log::info("bChangeXRotSignInEnterTransition={}", bChangeXRotSignInEnterTransition);
     SKSE::log::info("bReverseCopyRotationInLeaveTransition={}", bReverseCopyRotationInLeaveTransition);
     SKSE::log::info("-----------------------------------------");

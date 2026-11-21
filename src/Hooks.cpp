@@ -185,6 +185,126 @@ namespace BR180
         static inline REL::Relocation<decltype(Thunk)> func;
     };
 
+    // ---------------------------------------------------------------------------
+    // Map camera flip.
+    //
+    // The original plugin's rotation lives inside the map camera's internal math
+    // (hook1/2/3), which cannot be reproduced byte-for-byte without live debugging.
+    // Instead we rotate the map's render root (MapMenu::camera.cameraRoot, a NiNode)
+    // by the configured Z angle, and re-apply it every frame while the map is open,
+    // because the game rewrites the node transform when it sets up the camera.
+    //
+    // Rotation is applied around the node's own origin, so no translation correction
+    // is needed. Re-applying is idempotent: the target is always rot(angle) * original.
+    // ---------------------------------------------------------------------------
+    namespace MapCameraFlip
+    {
+        static bool          g_running{ false };
+        static RE::NiNode*   g_root{ nullptr };
+        static RE::NiMatrix3 g_origRot{};
+        static bool          g_haveOrig{ false };
+        static int           g_logBudget{ 0 };
+
+        static void Tick();
+
+        static void ApplyOnce()
+        {
+            auto* ui = RE::UI::GetSingleton();
+            if (!ui || !ui->IsMenuOpen(RE::MapMenu::MENU_NAME)) {
+                return;
+            }
+            auto* menu = ui->GetMenu<RE::MapMenu>().get();
+            if (!menu) {
+                return;
+            }
+
+            auto& cfg = Config::GetSingleton();
+            if (!cfg.bFlipMapCamera) {
+                return;
+            }
+
+            auto& cam = menu->camera;
+
+            // Reverse the camera's input deltas too: after the view is rotated by
+            // 180 degrees, dragging would otherwise feel mirrored. Honours the
+            // original ini key bReverseInputRot.
+            if (cfg.bReverseInputRot) {
+                cam.translationInput.x = -cam.translationInput.x;
+                cam.translationInput.y = -cam.translationInput.y;
+                cam.rotationInput.x = -cam.rotationInput.x;
+                cam.rotationInput.y = -cam.rotationInput.y;
+            }
+
+            auto* root = cam.cameraRoot.get();
+            if (!root) {
+                return;
+            }
+            if (cfg.fUpdateRotZ == 0.0f) {
+                return;
+            }
+
+            if (g_root != root) {
+                g_root = root;
+                g_origRot = root->local.rotate;
+                g_haveOrig = true;
+                if (g_logBudget > 0) {
+                    --g_logBudget;
+                    SKSE::log::info(
+                        "MapCamera root: translate=({}, {}, {}) scale={} angle={}",
+                        root->local.translate.x, root->local.translate.y, root->local.translate.z,
+                        root->local.scale, cfg.fUpdateRotZ);
+                }
+            }
+            if (!g_haveOrig) {
+                return;
+            }
+
+            RE::NiMatrix3 rot;
+            rot.MakeZRotation(cfg.fUpdateRotZ * (RE::NI_PI / 180.0f));
+            root->local.rotate = cfg.bReverseMatrixMult ? (rot * g_origRot) : (g_origRot * rot);
+
+            if (g_logBudget > 0) {
+                --g_logBudget;
+                SKSE::log::info("MapCamera flip applied (order={})", cfg.bReverseMatrixMult ? "rot*orig" : "orig*rot");
+            }
+        }
+
+        static void Tick()
+        {
+            if (!g_running) {
+                return;
+            }
+            ApplyOnce();
+            if (g_running) {
+                if (auto* tasks = SKSE::GetTaskInterface()) {
+                    tasks->AddTask(Tick);
+                }
+            }
+        }
+
+        static void Start()
+        {
+            if (g_running) {
+                return;
+            }
+            g_running = true;
+            g_logBudget = 2;
+            if (auto* tasks = SKSE::GetTaskInterface()) {
+                tasks->AddTask(Tick);
+            }
+        }
+
+        static void Stop()
+        {
+            g_running = false;
+            if (g_root && g_haveOrig) {
+                g_root->local.rotate = g_origRot;
+            }
+            g_root = nullptr;
+            g_haveOrig = false;
+        }
+    }
+
     // Map menu open/close listener drives the worldspace overrides only while the map
     // is open (matches "only for the map menu" semantics of the original ini).
     class MapMenuListener : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
@@ -206,8 +326,10 @@ namespace BR180
                 const auto tes = RE::TES::GetSingleton();
                 if (a_event->opening) {
                     WorldOverride::Apply(tes ? tes->GetRuntimeData2().worldSpace : nullptr);
+                    MapCameraFlip::Start();
                 } else {
                     WorldOverride::Revert();
+                    MapCameraFlip::Stop();
                 }
             }
             return RE::BSEventNotifyControl::kContinue;
