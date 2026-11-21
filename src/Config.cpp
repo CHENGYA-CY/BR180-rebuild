@@ -94,7 +94,7 @@ void Config::Load()
     iExtendCellNW_Y = ReadI16(path, "Override", "iExtendCellNW_Y", iExtendCellNW_Y);
     iExtendCellSE_X = ReadI16(path, "Override", "iExtendCellSE_X", iExtendCellSE_X);
     bFlipNorthRotation = ReadBool(path, "Override", "bFlipNorthRotation", bFlipNorthRotation);
-    bFlipMapCamera = ReadBool(path, "Override", "bFlipMapCamera", bFlipMapCamera);
+    iFlipMode = static_cast<int>(ReadI16(path, "Override", "iFlipMode", static_cast<std::int16_t>(iFlipMode)));
 
     bChangeXRotSignInEnterTransition = ReadBool(path, "Hacks", "bChangeXRotSignInEnterTransition", bChangeXRotSignInEnterTransition);
     bReverseCopyRotationInLeaveTransition = ReadBool(path, "Hacks", "bReverseCopyRotationInLeaveTransition", bReverseCopyRotationInLeaveTransition);
@@ -113,7 +113,7 @@ void Config::Log() const
     SKSE::log::info("iExtendCellNW_Y={}", iExtendCellNW_Y);
     SKSE::log::info("iExtendCellSE_X={}", iExtendCellSE_X);
     SKSE::log::info("bFlipNorthRotation={}", bFlipNorthRotation);
-    SKSE::log::info("bFlipMapCamera={}", bFlipMapCamera);
+    SKSE::log::info("iFlipMode={}", iFlipMode);
     SKSE::log::info("bChangeXRotSignInEnterTransition={}", bChangeXRotSignInEnterTransition);
     SKSE::log::info("bReverseCopyRotationInLeaveTransition={}", bReverseCopyRotationInLeaveTransition);
     SKSE::log::info("-----------------------------------------");

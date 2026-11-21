@@ -205,6 +205,7 @@ namespace BR180
         static bool          g_haveOrig{ false };
         static int           g_retriesLeft{ 0 };
         static int           g_logBudget{ 0 };
+        static int           g_probeLeft{ 0 };
 
         static bool LooksLikeValidPtr(const void* a_ptr) noexcept
         {
@@ -216,25 +217,67 @@ namespace BR180
 
         static void ApplyOnce()
         {
+            const bool probe = g_probeLeft > 0;
+
             auto* ui = RE::UI::GetSingleton();
-            if (!ui || !ui->IsMenuOpen(RE::MapMenu::MENU_NAME)) {
-                return;
+            if (probe) {
+                SKSE::log::info("probe: ui={} mapOpen={}",
+                    static_cast<const void*>(ui),
+                    ui ? ui->IsMenuOpen(RE::MapMenu::MENU_NAME) : false);
             }
-            auto* menu = ui->GetMenu<RE::MapMenu>().get();
-            if (!menu || !LooksLikeValidPtr(menu)) {
+            if (!ui || !ui->IsMenuOpen(RE::MapMenu::MENU_NAME)) {
+                if (probe) {
+                    --g_probeLeft;
+                }
                 return;
             }
 
-            auto& cfg = Config::GetSingleton();
-            if (!cfg.bFlipMapCamera) {
+            auto* menu = ui->GetMenu<RE::MapMenu>().get();
+            if (probe) {
+                SKSE::log::info("probe: menu={} valid={}",
+                    static_cast<const void*>(menu), LooksLikeValidPtr(menu) ? "yes" : "no");
+            }
+            if (!menu || !LooksLikeValidPtr(menu)) {
+                if (probe) {
+                    --g_probeLeft;
+                }
                 return;
             }
 
             auto& cam = menu->camera;
 
-            // Reverse the camera's input deltas too: after the view is rotated by
-            // 180 degrees, dragging would otherwise feel mirrored. Honours the
-            // original ini key bReverseInputRot.
+            if (probe) {
+                // Verify the MapMenu::camera / MapCamera offsets actually match this
+                // build: both worldSpace pointers must equal the player's worldspace.
+                auto* tes = RE::TES::GetSingleton();
+                auto* curWs = (tes && tes->GetRuntimeData2().worldSpace) ? tes->GetRuntimeData2().worldSpace : nullptr;
+                SKSE::log::info("probe: menu.worldSpace={} camera.worldSpace={} currentWorld={} match={}",
+                    static_cast<const void*>(menu->worldSpace),
+                    static_cast<const void*>(cam.worldSpace),
+                    static_cast<const void*>(curWs),
+                    cam.worldSpace == curWs);
+                SKSE::log::info("probe: cameraRoot={} valid={} currentState={}",
+                    static_cast<const void*>(cam.cameraRoot.get()),
+                    LooksLikeValidPtr(cam.cameraRoot.get()) ? "yes" : "no",
+                    static_cast<const void*>(cam.currentState.get()));
+                SKSE::log::info("probe: unk38=({}, {}) unk40=({}, {}, {}) unk4C={}",
+                    cam.unk38.x, cam.unk38.y,
+                    cam.unk40.x, cam.unk40.y, cam.unk40.z,
+                    cam.unk4C);
+            }
+
+            auto& cfg = Config::GetSingleton();
+            const int mode = cfg.iFlipMode;
+            if (mode <= 0 || mode > 3) {
+                if (probe) {
+                    SKSE::log::info("probe: iFlipMode={} -> transform disabled", mode);
+                    --g_probeLeft;
+                }
+                return;
+            }
+
+            // Reverse the camera's input deltas too: a mirrored / rotated view makes
+            // dragging feel inverted. Honours the original ini key bReverseInputRot.
             if (cfg.bReverseInputRot) {
                 cam.translationInput.x = -cam.translationInput.x;
                 cam.translationInput.y = -cam.translationInput.y;
@@ -244,12 +287,12 @@ namespace BR180
 
             auto* root = cam.cameraRoot.get();
             if (!root || !LooksLikeValidPtr(root)) {
+                if (probe) {
+                    SKSE::log::warn("probe: cameraRoot unusable -> cannot rotate");
+                    --g_probeLeft;
+                }
                 return;
             }
-            if (cfg.fUpdateRotZ == 0.0f) {
-                return;
-            }
-
             if (g_root != root) {
                 g_root = root;
                 g_origRot = root->local.rotate;
@@ -257,23 +300,39 @@ namespace BR180
                 if (g_logBudget > 0) {
                     --g_logBudget;
                     SKSE::log::info(
-                        "MapCamera root: translate=({}, {}, {}) scale={} angle={}",
+                        "MapCamera root: translate=({}, {}, {}) scale={} mode={}",
                         root->local.translate.x, root->local.translate.y, root->local.translate.z,
-                        root->local.scale, cfg.fUpdateRotZ);
+                        root->local.scale, mode);
                 }
             }
             if (!g_haveOrig) {
                 return;
             }
 
-            RE::NiMatrix3 rot;
-            rot.MakeZRotation(cfg.fUpdateRotZ * (RE::NI_PI / 180.0f));
-            root->local.rotate = cfg.bReverseMatrixMult ? (rot * g_origRot) : (g_origRot * rot);
+            // mode 1/2 are reflections (determinant -1); mode 3 is a rotation (+1).
+            RE::NiMatrix3 xform;  // identity
+            switch (mode) {
+            case 1:  // mirror left/right
+                xform.entry[0][0] = -1.0f;
+                break;
+            case 2:  // mirror top/bottom
+                xform.entry[1][1] = -1.0f;
+                break;
+            case 3:  // rotate 180 degrees
+                xform.MakeZRotation(RE::NI_PI);
+                break;
+            default:
+                return;
+            }
+            root->local.rotate = cfg.bReverseMatrixMult ? (xform * g_origRot) : (g_origRot * xform);
 
+            if (probe) {
+                --g_probeLeft;
+            }
             if (g_logBudget > 0) {
                 --g_logBudget;
-                SKSE::log::info("MapCamera flip applied (order={})",
-                    cfg.bReverseMatrixMult ? "rot*orig" : "orig*rot");
+                SKSE::log::info("MapCamera transform applied (mode={} order={})",
+                    mode, cfg.bReverseMatrixMult ? "xform*orig" : "orig*xform");
             }
         }
 
@@ -300,12 +359,13 @@ namespace BR180
                 return;
             }
             auto& cfg = Config::GetSingleton();
-            if (!cfg.bFlipMapCamera) {
+            if (cfg.iFlipMode <= 0 || cfg.iFlipMode > 3) {
                 return;
             }
             g_active = true;
             g_retriesLeft = 4;  // total 5 applications, then stop
             g_logBudget = 3;
+            g_probeLeft = 3;
             SKSE::log::info("MapCameraFlip start (bounded, retries={})", g_retriesLeft);
             if (auto* tasks = SKSE::GetTaskInterface()) {
                 tasks->AddTask(Tick);

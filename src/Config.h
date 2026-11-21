@@ -31,12 +31,14 @@ struct Config
     // northRotation by 180 degrees. Zero-risk struct write, may flip the
     // compass/map orientation. Set bFlipNorthRotation=0 in the ini to disable.
     bool bFlipNorthRotation{ true };
-    // Rebuild-only switch: rotate the map camera's render root (MapMenu::camera
-    // .cameraRoot) by fUpdateRotZ degrees for a few frames after the map opens.
-    // DEFAULT OFF: this path was the cause of a hard freeze in v6. Enable it
-    // deliberately in BR180.ini ([Override] bFlipMapCamera=1) to test it; setting
-    // it back to 0 takes effect immediately at next map open.
-    bool bFlipMapCamera{ false };
+    // Rebuild-only: which transform to apply to the map render root.
+    //   0 = off
+    //   1 = mirror left/right  (flip X)
+    //   2 = mirror top/bottom  (flip Y)
+    //   3 = rotate 180 degrees
+    // The original plugin's ini only ever expressed a Z rotation (fUpdateRot 0,0,180),
+    // which is NOT the same as a mirror. Set this in [Override] to pick the effect.
+    int iFlipMode{ 1 };
 
     // [Hacks]
     bool bChangeXRotSignInEnterTransition{ true };
