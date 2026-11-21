@@ -27,6 +27,10 @@ struct Config
     float fInitialPitch{ 310.0f };
     std::int16_t iExtendCellNW_Y{ 10 };
     std::int16_t iExtendCellSE_X{ 10 };
+    // Rebuild-only switch (not in the original ini): rotate the worldspace's
+    // northRotation by 180 degrees. Zero-risk struct write, may flip the
+    // compass/map orientation. Set bFlipNorthRotation=0 in the ini to disable.
+    bool bFlipNorthRotation{ true };
 
     // [Hacks]
     bool bChangeXRotSignInEnterTransition{ true };

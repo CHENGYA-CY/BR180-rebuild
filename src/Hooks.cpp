@@ -49,23 +49,69 @@ namespace BR180
             std::int16_t       nwCellY{ 0 };
             std::int16_t       seCellX{ 0 };
             float              initialPitch{ 0.0f };
+            float              northRotation{ 0.0f };
             bool               applied{ false };
         };
 
-        static Saved saved;
+        static Saved             saved;
+        static RE::TESWorldSpace* lastLogged{ nullptr };
+
+        static float NormalizeDeg(float a_deg) noexcept
+        {
+            while (a_deg > 360.0f) {
+                a_deg -= 360.0f;
+            }
+            while (a_deg < 0.0f) {
+                a_deg += 360.0f;
+            }
+            return a_deg;
+        }
+
+        // Dump the raw map data once per worldspace. This runs for EVERY worldspace
+        // the player opens the map in, so a mis-detected Beyond Reach name is still
+        // visible in the log (the key diagnostic when the flip appears to do nothing).
+        static void LogOnce(RE::TESWorldSpace* a_ws)
+        {
+            if (lastLogged == a_ws) {
+                return;
+            }
+            lastLogged = a_ws;
+            const char* id = a_ws->GetFormEditorID();
+            const char* name = id ? id : "<null>";
+            SKSE::log::info("Worldspace '{}': nw=({}, {}) se=({}, {}) br={}",
+                name,
+                a_ws->worldMapData.nwCellX, a_ws->worldMapData.nwCellY,
+                a_ws->worldMapData.seCellX, a_ws->worldMapData.seCellY,
+                isBRWorldspace(a_ws));
+            SKSE::log::info("Worldspace '{}': usable={}x{} pitch={} minH={} maxH={} northRot={}",
+                name,
+                a_ws->worldMapData.usableWidth, a_ws->worldMapData.usableHeight,
+                a_ws->worldMapData.cameraData.initialPitch,
+                a_ws->worldMapData.cameraData.minHeight,
+                a_ws->worldMapData.cameraData.maxHeight,
+                a_ws->northRotation);
+        }
 
         static void Apply(RE::TESWorldSpace* a_ws)
         {
-            auto& cfg = Config::GetSingleton();
-            if (!a_ws || !isBRWorldspace(a_ws)) {
+            if (!a_ws) {
                 return;
             }
+
+            LogOnce(a_ws);
+
+            if (!isBRWorldspace(a_ws)) {
+                return;
+            }
+
+            auto& cfg = Config::GetSingleton();
 
             if (!saved.applied || saved.ws != a_ws) {
                 saved.ws = a_ws;
                 saved.nwCellY = a_ws->worldMapData.nwCellY;
                 saved.seCellX = a_ws->worldMapData.seCellX;
                 saved.initialPitch = a_ws->worldMapData.cameraData.initialPitch;
+                saved.northRotation = a_ws->northRotation;
             }
 
             if (cfg.iExtendCellNW_Y > 0) {
@@ -75,17 +121,20 @@ namespace BR180
                 a_ws->worldMapData.seCellX = static_cast<std::int16_t>(saved.seCellX + cfg.iExtendCellSE_X);
             }
             if (cfg.fInitialPitch >= 0.0f) {
-                // The game stores initialPitch in DEGREES (ini uses 310 with >360 wrap).
-                float deg = cfg.fInitialPitch;
-                while (deg > 360.0f) {
-                    deg -= 360.0f;
-                }
-                a_ws->worldMapData.cameraData.initialPitch = deg;
+                // The game stores initialPitch in DEGREES (ini uses 310, wrapped to 310).
+                a_ws->worldMapData.cameraData.initialPitch = NormalizeDeg(cfg.fInitialPitch);
+            }
+            if (cfg.bFlipNorthRotation) {
+                a_ws->northRotation = NormalizeDeg(saved.northRotation + 180.0f);
             }
             saved.applied = true;
 
-            SKSE::log::info("Applied world map override for {}",
-                a_ws->GetFormEditorID() ? a_ws->GetFormEditorID() : "BR worldspace");
+            SKSE::log::info("Applied map override for '{}' (pitch {}->{}, northRot {}->{}, nwY {}->{}, seX {}->{})",
+                a_ws->GetFormEditorID() ? a_ws->GetFormEditorID() : "<null>",
+                saved.initialPitch, a_ws->worldMapData.cameraData.initialPitch,
+                saved.northRotation, a_ws->northRotation,
+                saved.nwCellY, a_ws->worldMapData.nwCellY,
+                saved.seCellX, a_ws->worldMapData.seCellX);
         }
 
         static void Revert()
@@ -94,6 +143,7 @@ namespace BR180
                 saved.ws->worldMapData.nwCellY = saved.nwCellY;
                 saved.ws->worldMapData.seCellX = saved.seCellX;
                 saved.ws->worldMapData.cameraData.initialPitch = saved.initialPitch;
+                saved.ws->northRotation = saved.northRotation;
                 saved.applied = false;
                 saved.ws = nullptr;
             }
