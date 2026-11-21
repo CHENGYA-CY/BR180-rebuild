@@ -32,10 +32,11 @@ struct Config
     // compass/map orientation. Set bFlipNorthRotation=0 in the ini to disable.
     bool bFlipNorthRotation{ true };
     // Rebuild-only switch: rotate the map camera's render root (MapMenu::camera
-    // .cameraRoot) by fUpdateRotZ degrees every frame while the map is open.
-    // This is what actually makes the map appear rotated. Set bFlipMapCamera=0
-    // in the ini to disable if it looks wrong.
-    bool bFlipMapCamera{ true };
+    // .cameraRoot) by fUpdateRotZ degrees for a few frames after the map opens.
+    // DEFAULT OFF: this path was the cause of a hard freeze in v6. Enable it
+    // deliberately in BR180.ini ([Override] bFlipMapCamera=1) to test it; setting
+    // it back to 0 takes effect immediately at next map open.
+    bool bFlipMapCamera{ false };
 
     // [Hacks]
     bool bChangeXRotSignInEnterTransition{ true };

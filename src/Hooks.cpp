@@ -199,11 +199,18 @@ namespace BR180
     // ---------------------------------------------------------------------------
     namespace MapCameraFlip
     {
-        static bool          g_running{ false };
+        static bool          g_active{ false };
         static RE::NiNode*   g_root{ nullptr };
         static RE::NiMatrix3 g_origRot{};
         static bool          g_haveOrig{ false };
+        static int           g_retriesLeft{ 0 };
         static int           g_logBudget{ 0 };
+
+        static bool LooksLikeValidPtr(const void* a_ptr) noexcept
+        {
+            const auto addr = reinterpret_cast<std::uintptr_t>(a_ptr);
+            return addr >= 0x10000 && addr < 0x7FFFFFFFFFFF;
+        }
 
         static void Tick();
 
@@ -214,7 +221,7 @@ namespace BR180
                 return;
             }
             auto* menu = ui->GetMenu<RE::MapMenu>().get();
-            if (!menu) {
+            if (!menu || !LooksLikeValidPtr(menu)) {
                 return;
             }
 
@@ -236,7 +243,7 @@ namespace BR180
             }
 
             auto* root = cam.cameraRoot.get();
-            if (!root) {
+            if (!root || !LooksLikeValidPtr(root)) {
                 return;
             }
             if (cfg.fUpdateRotZ == 0.0f) {
@@ -265,17 +272,22 @@ namespace BR180
 
             if (g_logBudget > 0) {
                 --g_logBudget;
-                SKSE::log::info("MapCamera flip applied (order={})", cfg.bReverseMatrixMult ? "rot*orig" : "orig*rot");
+                SKSE::log::info("MapCamera flip applied (order={})",
+                    cfg.bReverseMatrixMult ? "rot*orig" : "orig*rot");
             }
         }
 
+        // Bounded: applies now plus a few following frames, then stops.
+        // CRITICAL: this must never re-arm itself unconditionally. SKSE drains newly
+        // queued tasks inside the same tick, so an always-AddTask loop freezes the
+        // game main thread (v6 bug: map open -> hard hang).
         static void Tick()
         {
-            if (!g_running) {
+            if (!g_active) {
                 return;
             }
             ApplyOnce();
-            if (g_running) {
+            if (g_active && --g_retriesLeft > 0) {
                 if (auto* tasks = SKSE::GetTaskInterface()) {
                     tasks->AddTask(Tick);
                 }
@@ -284,11 +296,17 @@ namespace BR180
 
         static void Start()
         {
-            if (g_running) {
+            if (g_active) {
                 return;
             }
-            g_running = true;
-            g_logBudget = 2;
+            auto& cfg = Config::GetSingleton();
+            if (!cfg.bFlipMapCamera) {
+                return;
+            }
+            g_active = true;
+            g_retriesLeft = 4;  // total 5 applications, then stop
+            g_logBudget = 3;
+            SKSE::log::info("MapCameraFlip start (bounded, retries={})", g_retriesLeft);
             if (auto* tasks = SKSE::GetTaskInterface()) {
                 tasks->AddTask(Tick);
             }
@@ -296,12 +314,11 @@ namespace BR180
 
         static void Stop()
         {
-            g_running = false;
-            if (g_root && g_haveOrig) {
-                g_root->local.rotate = g_origRot;
-            }
-            g_root = nullptr;
-            g_haveOrig = false;
+            g_active = false;
+            g_retriesLeft = 0;
+            // Deliberately do NOT dereference g_root here: the node may already be
+            // torn down, and keeping g_origRot prevents the rotation from compounding
+            // when the map is reopened on the same node instance.
         }
     }
 
