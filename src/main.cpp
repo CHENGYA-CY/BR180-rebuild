@@ -39,7 +39,7 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
     SKSE::Init(a_skse, { .log = true, .logName = "BR180", .trampoline = true, .trampolineSize = 256 });
 
     SKSE::log::info("BR180 v{}.{}.{}-0", Version::MAJOR, Version::MINOR, Version::PATCH);
-    SKSE::log::info("build tag: v14-audited (verified vtbl[5] + baseline fix)");
+    SKSE::log::info("build tag: v15-scaleform (mapMovie mirror, camera route disproven)");
     SKSE::log::info("Runtime: {:08x}", a_skse->RuntimeVersion().pack());
     SKSE::log::info("SKSE: {:08x}", a_skse->SKSEVersion());
 

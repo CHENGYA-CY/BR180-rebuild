@@ -405,6 +405,14 @@ namespace BR180
         static bool         g_fromMapMovie{ false };
         static int          g_probeLeft{ 0 };
         static bool         g_reported{ false };
+        // v15: baseline transform captured before the first mirror, used to
+        // compensate position after flipping (scale about the registration point
+        // otherwise moves the map off-screen).
+        static double       g_origX{ 0.0 };
+        static double       g_origXScale{ 100.0 };
+        static double       g_origYScale{ 100.0 };
+        static double       g_mapW{ 0.0 };
+        static bool         g_haveBaseline{ false };
 
         static const char* SafeName(RE::GFxValue& a_val)
         {
@@ -474,12 +482,16 @@ namespace BR180
                 return;
             }
 
-            if (!g_haveTarget && g_probeLeft > 0) {
-                --g_probeLeft;
-
+            // v15: retry EVERY frame until a display object is found. The map
+            // clip is created lazily by ActionScript after menu-open, so the
+            // first frames can legitimately return a non-display value.
+            if (!g_haveTarget) {
                 // 1) C++ side: MapMenu::mapMovie holds the GFxValue of the map clip.
                 auto& mm = a_menu->mapMovie;
-                SKSE::log::info("scaleform: MapMenu::mapMovie type={}", static_cast<int>(mm.GetType()));
+                if (g_probeLeft > 0) {
+                    --g_probeLeft;
+                    SKSE::log::info("scaleform: MapMenu::mapMovie type={}", static_cast<int>(mm.GetType()));
+                }
                 if (mm.IsDisplayObject()) {
                     g_target = mm;
                     g_haveTarget = true;
@@ -522,18 +534,48 @@ namespace BR180
                 return;
             }
 
-            const double sx = (a_mode == 1 || a_mode == 3) ? -100.0 : 100.0;
-            const double sy = (a_mode == 2 || a_mode == 3) ? -100.0 : 100.0;
+            // Capture the pristine transform + width ONCE, before touching anything,
+            // and reuse these constants every frame so the applied value is stable
+            // (reading _width after a negative scale would feed back into x).
+            if (!g_haveBaseline) {
+                RE::GFxValue::DisplayInfo base;
+                if (g_target.GetDisplayInfo(&base)) {
+                    g_origX = base.GetX();
+                    g_origXScale = base.GetXScale();
+                    g_origYScale = base.GetYScale();
+                }
+                RE::GFxValue sw;
+                // Map clip's own width first, then the stage width.
+                if (g_target.GetMember("_width", &sw) && sw.IsNumber() && sw.GetNumber() > 0.0) {
+                    g_mapW = sw.GetNumber();
+                } else if (view->GetVariable(&sw, "_root._width") && sw.IsNumber()) {
+                    g_mapW = sw.GetNumber();
+                }
+                g_haveBaseline = true;
+                SKSE::log::info("scaleform baseline: x={} xscale={} yscale={} mapW={}",
+                    g_origX, g_origXScale, g_origYScale, g_mapW);
+            }
+
+            const auto& cfg = Config::GetSingleton();
+            // Flash scales about the registration point. With xscale=-100 the map
+            // flips to the LEFT of its current x. Shift right by the (cached)
+            // width to bring it back on screen; ini adds fine tuning.
+            const bool mirrorX = (a_mode == 1 || a_mode == 3);
+            const bool mirrorY = (a_mode == 2 || a_mode == 3);
+            const double sx = mirrorX ? -std::fabs(g_origXScale) : std::fabs(g_origXScale);
+            const double sy = mirrorY ? -std::fabs(g_origYScale) : std::fabs(g_origYScale);
+            const double x = g_origX + (mirrorX ? g_mapW : 0.0) + cfg.fMirrorShiftX;
 
             RE::GFxValue::DisplayInfo info;
             info.SetXScale(sx);
             info.SetYScale(sy);
+            info.SetX(x);
             const bool ok = g_target.SetDisplayInfo(info);
 
             if (!g_reported) {
                 g_reported = true;
-                SKSE::log::info("scaleform mirror: fromMapMovie={} xscale={} yscale={} ok={}",
-                    g_fromMapMovie, sx, sy, ok);
+                SKSE::log::info("scaleform MIRROR APPLIED: fromMapMovie={} mode={} x={}->{} xscale={}->{} yscale={}->{} mapW={} ok={}",
+                    g_fromMapMovie, a_mode, g_origX, x, g_origXScale, sx, g_origYScale, sy, g_mapW, ok);
             }
         }
 
@@ -542,6 +584,7 @@ namespace BR180
             g_reported = false;
             g_haveTarget = false;
             g_fromMapMovie = false;
+            g_haveBaseline = false;
             g_target = RE::GFxValue();
         }
 
@@ -699,7 +742,17 @@ namespace BR180
             if (!isBRWorldspace(ws)) {
                 return;
             }
-            ApplyTransform(a_menu, cfg.iFlipMode);
+
+            // v15: the 3D camera-root route is DISPROVEN by v14's own log --
+            // "game rewrote the transform, baseline refreshed" every frame, i.e.
+            // the game recomputes cameraRoot->local.rotate AFTER our write, so a
+            // matrix negation can never survive to the rendered frame.
+            //
+            // The world map is a Scaleform display object (3D terrain rendered to
+            // a texture, then shown by MapMenu.swf). Mirroring that display object
+            // with _xscale=-100 is the correct layer: it is never rewritten by the
+            // camera code, and it mirrors the terrain AND the markers together.
+            ScaleformMirror::Apply(a_menu, cfg.iFlipMode);
         }
 
         static void Install(RE::MapMenu* a_menu)
@@ -769,9 +822,12 @@ namespace BR180
                     WorldOverride::Apply(tes ? tes->GetRuntimeData2().worldSpace : nullptr);
                     MapMirror::ResetForOpen();
                     MapMirror::Install(mapMenu);
+                    // Re-resolve the Scaleform map clip every time the menu opens.
+                    ScaleformMirror::OnMenuOpen();
                 } else {
                     WorldOverride::Revert();
                     MapMirror::ResetForOpen();
+                    ScaleformMirror::Reset();
                 }
             }
             return RE::BSEventNotifyControl::kContinue;

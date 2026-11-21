@@ -39,6 +39,11 @@ struct Config
     // The original plugin's ini only ever expressed a Z rotation (fUpdateRot 0,0,180),
     // which is NOT the same as a mirror. Set this in [Override] to pick the effect.
     int iFlipMode{ 1 };
+    // v15: Scaleform mirror position fine-tuning. The world-map clip's
+    // registration point can differ, so after the automatic +width centering
+    // these are added to X/Y. Only needed if the mirrored map is off-center.
+    float fMirrorShiftX{ 0.0f };
+    float fMirrorShiftY{ 0.0f };
 
     // [Hacks]
     bool bChangeXRotSignInEnterTransition{ true };
